@@ -1,203 +1,253 @@
-- 第1步：以system登录到pdborcl，创建角色liyongqi1和用户liyongqi2，并授权和分配空间：
+# 实验6：基于Oracle的订单管理数据库设计
 
-语句“ALTER USER liyongqi2 QUOTA 50M ON users;”是指授权liyongqi2用户访问users表空间，空间限额是50M。
+姓名：李永奇 学号：201810414417
 
-```
-CREATE ROLE liyongqi1;
-GRANT connect,resource,CREATE VIEW TO liyongqi1;
-CREATE USER liyongqi2 IDENTIFIED BY 123 DEFAULT TABLESPACE users TEMPORARY TABLESPACE temp;
-ALTER USER liyongqi2 QUOTA 50M ON users;
-GRANT liyongqi1 TO liyongqi2;
-```
+## 期末考核要求
 
-![image-20210322085019462](test6.assets/image-20210322085019462.png)
+- 自行设计一个信息系统的数据库项目，自拟`某项目`名称。
+- 设计项目涉及的表及表空间使用方案。至少5张表和5万条数据，两个表空间。
+- 设计权限及用户分配方案。至少两类角色，两个用户。
+- 在数据库中建立一个程序包，在包中用PL/SQL语言设计一些存储过程和函数，实现比较复杂的业务逻辑，用模拟数据进行执行计划分析。
+- 设计自动备份方案或则手工备份方案。
+- 设计容灾方案。使用两台主机，通过DataGuard实现数据库整体的异地备份(可选)。
 
-- 第2步：新用户liyongqi2连接到pdborcl，创建表mytable和视图myview，插入数据，最后将myview的SELECT对象权限授予hr用户。
+## 实验步骤
 
-  ![image-20210322085859511](test6.assets/image-20210322085859511.png)
+#### 1.创建表空间
 
-我们首先使用show user语句，我们可以发现确实是liyongqi2用户，然后继续其他操作。
+##### space_1
 
-![image-20210322090023056](test6.assets/image-20210322090023056.png)
+Create Tablespace space_1
+datafile
+'/home/oracle/app/oracle/oradata/orcl/pdborcl/pdbtest_1.dbf'
+  SIZE 100M AUTOEXTEND ON NEXT 256M MAXSIZE UNLIMITED,
+'/home/oracle/app/oracle/oradata/orcl/pdborcl/pdbtest_2.dbf'
+  SIZE 100M AUTOEXTEND ON NEXT 256M MAXSIZE UNLIMITED
+EXTENT MANAGEMENT LOCAL SEGMENT SPACE MANAGEMENT AUTO;
 
-接下来创建表格mytable，并且添加数据到mytable，然后创建视图myview，并且把mytable中的name作为myview的数据。
+![image-20210614234831277](test6.assets/image-20210614234831277.png)
 
-![image-20210322090334019](test6.assets/image-20210322090334019.png)
+##### space_2
 
-然后使用SELECT * FROM myview;查看myview数据可以看到数据，
+Create Tablespace space_2
+datafile
+'/home/oracle/app/oracle/oradata/orcl/pdborcl/pdbtest_2_1.dbf'
+  SIZE 100M AUTOEXTEND ON NEXT 256M MAXSIZE UNLIMITED,
+'/home/oracle/app/oracle/oradata/orcl/pdborcl/pdbtest_2_2.dbf'
+  SIZE 100M AUTOEXTEND ON NEXT 256M MAXSIZE UNLIMITED
+EXTENT MANAGEMENT LOCAL SEGMENT SPACE MANAGEMENT AUTO;
 
-```
-NAME
---------------------------------------------------
-zhang
-wang
-```
+![image-20210614235039341](test6.assets/image-20210614235039341.png)
 
-![image-20210322091630902](test6.assets/image-20210322091630902.png)
+#### 2. 创建角色及用户
 
-使用GRANT SELECT ON myview TO hr;语句，将myview的SELECT对象权限授予hr用户
+**用户默认使用表空间space_1**
+**创建第一个角色和用户**
 
-- 第3步：用户hr连接到pdborcl，查询liyongqi2授予它的视图myview
+- 创建角色li1将connect,resource,create view授权给li1
+- 创建用户li_1
+- 分配60M空间给li_1并将角色li1授权给用户li_1
 
-  ![image-20210322091800789](test6.assets/image-20210322091800789.png)
+CREATE ROLE li1;
+GRANT connect,resource,CREATE VIEW TO li1;
+CREATE USER li_1 IDENTIFIED BY 123 DEFAULT TABLESPACE space_1 TEMPORARY TABLESPACE temp;
+ALTER USER li_1 QUOTA 60M ON space_1;
+GRANT li1 TO li_1;
 
-可以发现使用hr用户查询到myview
+![image-20210614235526396](test6.assets/image-20210614235526396.png)
 
-首先进入自己的用户
+**创建第二个角色和用户**
 
-![image-20210405155010083](test6.assets/image-20210405155010083.png)
+- 创建角色li2，将connect,resource权限给li2
 
-【示例8-11】在主表orders和从表order_details之间建立引用分区 在study用户中创建两个表：orders（订单表）和order_details（订单详表），两个表通过列order_id建立主外键关联。orders表按范围分区进行存储，order_details使用引用分区进行存储。
+- 创建用户li_2
 
-![image-20210405155811756](test6.assets/image-20210405155811756.png) 创建orders表的部分语句是：
+- 分配60M空间给li_2并将角色li2授权给用户li_2
 
-```
-SQL> CREATE TABLE orders 
+  CREATE ROLE li2;
+
+  GRANT connect,resource TO li2;
+
+  CREATE USER li_2 IDENTIFIED BY 123 DEFAULT TABLESPACE space_1 TEMPORARY TABLESPACE temp;
+
+  ALTER USER li_2 QUOTA 60M ON space_1;
+
+  GRANT li2 TO li_2;
+
+  ![image-20210614235804620](test6.assets/image-20210614235804620.png)
+
+#### 3. 在用户li_1下创建表
+
+**创建管理员表**
+
+CREATE TABLE ADMINS
 (
- order_id NUMBER(10, 0) NOT NULL 
- , customer_name VARCHAR2(40 BYTE) NOT NULL 
- , customer_tel VARCHAR2(40 BYTE) NOT NULL 
- , order_date DATE NOT NULL 
- , employee_id NUMBER(6, 0) NOT NULL 
- , discount NUMBER(8, 2) DEFAULT 0 
- , trade_receivable NUMBER(8, 2) DEFAULT 0 
+  ID NUMBER(*, 0) NOT NULL 
+, PASSWORD VARCHAR2(20 BYTE) NOT NULL 
+, ADMIN VARCHAR2(20 BYTE) NOT NULL 
+, CONSTRAINT ADMINS_PK PRIMARY KEY 
+  (
+    ID 
+  )
+  USING INDEX 
+  (
+      CREATE UNIQUE INDEX ADMINS_PK ON ADMINS (ID ASC) 
+      LOGGING 
+      TABLESPACE SPACE_1 
+      PCTFREE 10 
+      INITRANS 2 
+      STORAGE 
+      ( 
+        BUFFER_POOL DEFAULT 
+      ) 
+      NOPARALLEL 
+  )
+  ENABLE 
 ) 
-TABLESPACE USERS 
-PCTFREE 10 INITRANS 1 
-STORAGE (   BUFFER_POOL DEFAULT ) 
-NOCOMPRESS NOPARALLEL 
-PARTITION BY RANGE (order_date) 
-(
- PARTITION PARTITION_BEFORE_2016 VALUES LESS THAN (
- TO_DATE(' 2016-01-01 00:00:00', 'SYYYY-MM-DD HH24:MI:SS', 
- 'NLS_CALENDAR=GREGORIAN')) 
- NOLOGGING 
- TABLESPACE USERS 
- PCTFREE 10 
- INITRANS 1 
- STORAGE 
+LOGGING 
+TABLESPACE SPACE_1 
+PCTFREE 10 
+INITRANS 1 
+STORAGE 
 ( 
- INITIAL 8388608 
- NEXT 1048576 
- MINEXTENTS 1 
- MAXEXTENTS UNLIMITED 
- BUFFER_POOL DEFAULT 
+  BUFFER_POOL DEFAULT 
 ) 
-NOCOMPRESS NO INMEMORY  
-, PARTITION PARTITION_BEFORE_2017 VALUES LESS THAN (
-TO_DATE(' 2017-01-01 00:00:00', 'SYYYY-MM-DD HH24:MI:SS', 
-'NLS_CALENDAR=GREGORIAN')) 
-NOLOGGING 
-TABLESPACE USERS02 
-);
-```
+NOCOMPRESS 
+NO INMEMORY 
+NOPARALLEL;
 
-![image-20210405155909282](test6.assets/image-20210405155909282.png)
+![image-20210615000131642](test6.assets/image-20210615000131642.png)
 
-- 创建order_details表的部分语句如下：
+**创建用户表单**
 
-```
-SQL> CREATE TABLE order_details 
+CREATE TABLE USER_s
 (
-id NUMBER(10, 0) NOT NULL 
-, order_id NUMBER(10, 0) NOT NULL
-, product_id VARCHAR2(40 BYTE) NOT NULL 
-, product_num NUMBER(8, 2) NOT NULL 
-, product_price NUMBER(8, 2) NOT NULL 
-, CONSTRAINT order_details_fk1 FOREIGN KEY  (order_id)
-REFERENCES orders  (  order_id   )
-ENABLE 
+  ID NUMBER(*, 0) NOT NULL 
+, PASSWORD VARCHAR2(20 BYTE) NOT NULL 
+, USERNAME VARCHAR2(50 BYTE) NOT NULL 
+, PHONE VARCHAR2(20 BYTE) NOT NULL 
+, ADDRESS VARCHAR2(30 BYTE) NOT NULL 
+, REGISTRATIONDATE DATE NOT NULL 
+, CART_ID NUMBER(*, 0) NOT NULL 
+, CONSTRAINT U_PK PRIMARY KEY 
+  (
+    ID 
+  )
+  USING INDEX 
+  (
+      CREATE UNIQUE INDEX U_PK ON USER_s (ID ASC) 
+      LOGGING 
+      TABLESPACE SPACE_1 
+      PCTFREE 10 
+      INITRANS 2 
+      STORAGE 
+      ( 
+        BUFFER_POOL DEFAULT 
+      ) 
+      NOPARALLEL 
+  )
+  ENABLE 
 ) 
-TABLESPACE USERS 
-PCTFREE 10 INITRANS 1 
-STORAGE (   BUFFER_POOL DEFAULT ) 
-NOCOMPRESS NOPARALLEL
-PARTITION BY REFERENCE (order_details_fk1)
+TABLESPACE SPACE_1 
+PCTFREE 10 
+INITRANS 1 
+STORAGE 
+( 
+  BUFFER_POOL DEFAULT 
+) 
+NOCOMPRESS 
+NOPARALLEL 
+PARTITION BY RANGE (REGISTRATIONDATE) 
+SUBPARTITION BY RANGE (REGISTRATIONDATE) 
 (
-PARTITION PARTITION_BEFORE_2016 
-NOLOGGING 
-TABLESPACE USERS --必须指定表空间,否则会将分区存储在用户的默认表空间中
-
-) 
-NOCOMPRESS NO INMEMORY, 
-PARTITION PARTITION_BEFORE_2017 
-NOLOGGING 
-TABLESPACE USERS02
-) 
-NOCOMPRESS NO INMEMORY  
+  PARTITION DATE2018 VALUES LESS THAN (TO_DATE(' 2018-12-31 00:00:00', 'SYYYY-MM-DD HH24:MI:SS', 'NLS_CALENDAR=GREGORIAN')) 
+  TABLESPACE SPACE_1 
+  PCTFREE 10 
+  INITRANS 1 
+  STORAGE 
+  ( 
+    BUFFER_POOL DEFAULT 
+  ) 
+  NOCOMPRESS NO INMEMORY 
+  (
+    SUBPARTITION DATE2018_3 VALUES LESS THAN (TO_DATE(' 2018-03-31 00:00:00', 'SYYYY-MM-DD HH24:MI:SS', 'NLS_CALENDAR=GREGORIAN')) 
+    NOCOMPRESS NO INMEMORY  
+  , SUBPARTITION DATE2018_6 VALUES LESS THAN (TO_DATE(' 2018-06-30 00:00:00', 'SYYYY-MM-DD HH24:MI:SS', 'NLS_CALENDAR=GREGORIAN')) 
+    NOCOMPRESS NO INMEMORY  
+  , SUBPARTITION DATE2018_9 VALUES LESS THAN (TO_DATE(' 2018-09-30 00:00:00', 'SYYYY-MM-DD HH24:MI:SS', 'NLS_CALENDAR=GREGORIAN')) 
+    NOCOMPRESS NO INMEMORY  
+  , SUBPARTITION DATE2018_12 VALUES LESS THAN (TO_DATE(' 2018-12-31 00:00:00', 'SYYYY-MM-DD HH24:MI:SS', 'NLS_CALENDAR=GREGORIAN')) 
+    NOCOMPRESS NO INMEMORY  
+  )  
+, PARTITION DATE2019 VALUES LESS THAN (TO_DATE(' 2019-12-31 00:00:00', 'SYYYY-MM-DD HH24:MI:SS', 'NLS_CALENDAR=GREGORIAN')) 
+  TABLESPACE SPACE_1 
+  PCTFREE 10 
+  INITRANS 1 
+  STORAGE 
+  ( 
+    BUFFER_POOL DEFAULT 
+  ) 
+  NOCOMPRESS NO INMEMORY 
+  (
+    SUBPARTITION DATE2019_3 VALUES LESS THAN (TO_DATE(' 2019-03-31 00:00:00', 'SYYYY-MM-DD HH24:MI:SS', 'NLS_CALENDAR=GREGORIAN')) 
+    NOCOMPRESS NO INMEMORY  
+  , SUBPARTITION DATE2019_6 VALUES LESS THAN (TO_DATE(' 2019-06-30 00:00:00', 'SYYYY-MM-DD HH24:MI:SS', 'NLS_CALENDAR=GREGORIAN')) 
+    NOCOMPRESS NO INMEMORY  
+  , SUBPARTITION DATE2019_9 VALUES LESS THAN (TO_DATE(' 2019-09-30 00:00:00', 'SYYYY-MM-DD HH24:MI:SS', 'NLS_CALENDAR=GREGORIAN')) 
+    NOCOMPRESS NO INMEMORY  
+  , SUBPARTITION DATE2019_12 VALUES LESS THAN (TO_DATE(' 2019-12-31 00:00:00', 'SYYYY-MM-DD HH24:MI:SS', 'NLS_CALENDAR=GREGORIAN')) 
+    NOCOMPRESS NO INMEMORY  
+  )  
 );
-```
 
-插入数据
+![image-20210615000437370](test6.assets/image-20210615000437370.png)
 
-```
-begin
-  v_order_detail_id:=1;
-  delete from order_details;
-  delete from orders;
-  for i in 1..10000
-  loop
-    if i mod 6 =0 then
-      dt:=to_date('2015-3-2','yyyy-mm-dd')+(i mod 60); --PARTITION_2015
-    elsif i mod 6 =1 then
-      dt:=to_date('2016-3-2','yyyy-mm-dd')+(i mod 60); --PARTITION_2016
-    elsif i mod 6 =2 then
-      dt:=to_date('2017-3-2','yyyy-mm-dd')+(i mod 60); --PARTITION_2017
-    elsif i mod 6 =3 then
-      dt:=to_date('2018-3-2','yyyy-mm-dd')+(i mod 60); --PARTITION_2018
-    elsif i mod 6 =4 then
-      dt:=to_date('2019-3-2','yyyy-mm-dd')+(i mod 60); --PARTITION_2019
-    else
-      dt:=to_date('2020-3-2','yyyy-mm-dd')+(i mod 60); --PARTITION_2020
-    end if;
-    V_EMPLOYEE_ID:=CASE I MOD 6 WHEN 0 THEN 11 WHEN 1 THEN 111 WHEN 2 THEN 112
-                                WHEN 3 THEN 12 WHEN 4 THEN 121 ELSE 122 END;
-    --插入订单
-    v_order_id:=i;
-    v_name := 'aa'|| 'aa';
-    v_name := 'zhang' || i;
-    v_tel := '139888883' || i;
-    insert /*+append*/ into ORDERS (ORDER_ID,CUSTOMER_NAME,CUSTOMER_TEL,ORDER_DATE,EMPLOYEE_ID,DISCOUNT)
-      values (v_order_id,v_name,v_tel,dt,V_EMPLOYEE_ID,dbms_random.value(100,0));
-    --插入订单y一个订单包括3个产品
-    v:=dbms_random.value(10000,4000);
-    v_name:='computer'|| (i mod 3 + 1);
-    insert /*+append*/ into ORDER_DETAILS(ID,ORDER_ID,PRODUCT_NAME,PRODUCT_NUM,PRODUCT_PRICE)
-      values (v_order_detail_id,v_order_id,v_name,2,v);
-    v:=dbms_random.value(1000,50);
-    v_name:='paper'|| (i mod 3 + 1);
-    v_order_detail_id:=v_order_detail_id+1;
-    insert /*+append*/ into ORDER_DETAILS(ID,ORDER_ID,PRODUCT_NAME,PRODUCT_NUM,PRODUCT_PRICE)
-      values (v_order_detail_id,v_order_id,v_name,3,v);
-    v:=dbms_random.value(9000,2000);
-    v_name:='phone'|| (i mod 3 + 1);
+**创建商品表**
 
-    v_order_detail_id:=v_order_detail_id+1;
-    insert /*+append*/ into ORDER_DETAILS(ID,ORDER_ID,PRODUCT_NAME,PRODUCT_NUM,PRODUCT_PRICE)
-      values (v_order_detail_id,v_order_id,v_name,1,v);
-    --在触发器关闭的情况下，需要手工计算每个订单的应收金额：
-    select sum(PRODUCT_NUM*PRODUCT_PRICE) into m from ORDER_DETAILS where ORDER_ID=v_order_id;
-    if m is null then
-     m:=0;
-    end if;
-    UPDATE ORDERS SET TRADE_RECEIVABLE = m - discount WHERE ORDER_ID=v_order_id;
-    IF I MOD 1000 =0 THEN
-      commit; --每次提交会加快插入数据的速度
-    END IF;
-  end loop;
-end;
-/
-select count(*) from orders;
-select count(*) from order_details;
-```
+CREATE TABLE COMMODITY 
+(
+  ID NUMBER(*, 0) NOT NULL 
+, PID NUMBER(*, 0) NOT NULL 
+, BOOKSNAME VARCHAR2(50 BYTE) NOT NULL 
+, PRICE NUMBER NOT NULL 
+, DESCRIBE VARCHAR2(80 BYTE) NOT NULL 
+, NUM NUMBER(*, 0) NOT NULL 
+, ADMIN_ID NUMBER(*, 0) NOT NULL 
+, CONSTRAINT COMMODITY_PK PRIMARY KEY 
+  (
+    ID 
+  )
+  USING INDEX 
+  (
+      CREATE UNIQUE INDEX COMMODITY_PK ON COMMODITY (ID ASC) 
+      LOGGING 
+      TABLESPACE SPACE_1 
+      PCTFREE 10 
+      INITRANS 2 
+      STORAGE 
+      ( 
+        BUFFER_POOL DEFAULT 
+      ) 
+      NOPARALLEL 
+  )
+  ENABLE 
+) 
+LOGGING 
+TABLESPACE SPACE_1 
+PCTFREE 10 
+INITRANS 1 
+STORAGE 
+( 
+  BUFFER_POOL DEFAULT 
+) 
+NOCOMPRESS 
+NO INMEMORY 
+NOPARALLEL;
 
-![image-20210405160255583](test6.assets/image-20210405160255583.png)
+![image-20210615000613977](test6.assets/image-20210615000613977.png)
 
-![image-20210405160825361](test6.assets/image-20210405160825361.png)
+#### 创建DEPARTMENTS表
 
-### 创建DEPARTMENTS表
-
-```
 CREATE TABLE DEPARTMENTS
 (
   DEPARTMENT_ID NUMBER(6, 0) NOT NULL
@@ -238,54 +288,10 @@ STORAGE
   BUFFER_POOL DEFAULT
 )
 NOCOMPRESS NO INMEMORY NOPARALLEL;
-```
 
-```
-CREATE TABLE DEPARTMENTS
-(
-  DEPARTMENT_ID NUMBER(6, 0) NOT NULL
-, DEPARTMENT_NAME VARCHAR2(40 BYTE) NOT NULL
-, CONSTRAINT DEPARTMENTS_PK PRIMARY KEY
-  (
-    DEPARTMENT_ID
-  )
-  USING INDEX
-  (
-      CREATE UNIQUE INDEX DEPARTMENTS_PK ON DEPARTMENTS (DEPARTMENT_ID ASC)
-      NOLOGGING
-      TABLESPACE USERS
-      PCTFREE 10
-      INITRANS 2
-      STORAGE
-      (
-        INITIAL 65536
-        NEXT 1048576
-        MINEXTENTS 1
-        MAXEXTENTS UNLIMITED
-        BUFFER_POOL DEFAULT
-      )
-      NOPARALLEL
-  )
-  ENABLE
-)
-NOLOGGING
-TABLESPACE USERS
-PCTFREE 10
-INITRANS 1
-STORAGE
-(
-  INITIAL 65536
-  NEXT 1048576
-  MINEXTENTS 1
-  MAXEXTENTS UNLIMITED
-  BUFFER_POOL DEFAULT
-)
-NOCOMPRESS NO INMEMORY NOPARALLEL;
-```
+![image-20210615002055891](test6.assets/image-20210615002055891.png)
 
-![image-20210430140306723](test6.assets/image-20210430140306723.png)
-
-### **创建EMPLOYEES表**
+#### **创建EMPLOYEES表**
 
 ```
 CREATE TABLE EMPLOYEES
@@ -355,7 +361,7 @@ LOB (PHOTO) STORE AS SYS_LOB0000092017C00009$$
 );
 ```
 
-![image-20210430140450464](test6.assets/image-20210430140450464.png)
+![image-20210615002236701](test6.assets/image-20210615002236701.png)
 
 ### **创建EMPLOYEES表索引**
 
@@ -376,7 +382,7 @@ STORAGE
 NOPARALLEL;
 ```
 
-![image-20210430140637101](test6.assets/image-20210430140637101.png)
+![image-20210615002314760](test6.assets/image-20210615002314760.png)
 
 ### 修改表结构
 
@@ -424,7 +430,7 @@ ADD CONSTRAINT EMPLOYEES_SALARY CHECK
 ENABLE;
 ```
 
-![image-20210430140801317](test6.assets/image-20210430140801317.png)
+![image-20210615002357963](test6.assets/image-20210615002357963.png)
 
 ### **创建PRODUCTS表**
 
@@ -458,7 +464,7 @@ ADD CONSTRAINT PRODUCTS_CHK1 CHECK
 ENABLE;
 ```
 
-![image-20210430140910111](test6.assets/image-20210430140910111.png)
+![image-20210615002433398](test6.assets/image-20210615002433398.png)
 
 ### **创建存储器**
 
@@ -471,7 +477,7 @@ CREATE GLOBAL TEMPORARY TABLE "ORDER_ID_TEMP"
    COMMENT ON TABLE "ORDER_ID_TEMP"  IS '存储临时ORDER_ID';
 ```
 
-![image-20210430141118165](test6.assets/image-20210430141118165.png)
+![image-20210615002504678](test6.assets/image-20210615002504678.png)
 
 ### **创建ORDERS表和表索引**
 
@@ -1044,35 +1050,126 @@ END;
 
 ![image-20210430151538049](test6.assets/image-20210430151538049-1623682543314.png)
 
-根据windowns计划定时任务执行备份脚本，来定时备份。
+## 备份与恢复
 
- 创建备份脚本
+- 查看全库所有需要备份的相关文件
 
-Oracle备份脚本
+```
+$sqlplus sys/123@202.115.82.8/orcl as sysdba
+SELECT NAME FROM v$datafile
+UNION ALL
+SELECT MEMBER AS NAME FROM v$logfile
+UNION ALL
+SELECT NAME FROM v$controlfile;
+```
 
-echo 开始备份数据库
+![image-20210615003508870](test6.assets/image-20210615003508870.png)
 
-if not exist D:\db_bak\files md D:\db_bak\files
+![image-20210615003520405](test6.assets/image-20210615003520405.png)
 
-if not exist D:\db_bak\logs md D:\db_bak\logs
 
-set var=set var=%Date:~0,4%%Date:~5,2%%Date:~8,2%_%time:~0,2%%time:~3,2%%time:~6,2%     
 
-exp akssso/akssso@127.0.0.1/ORCL file=D:\db_bak\files\akssso_%var%.dmp log=D:\db_bak\logs\akssso_%var%.log 
+## sys用户登录
 
-echo 删除过久的备份记录
+- 必须以专用模式登录： $rman target sys/123@202.115.82.8/orcl:dedicated
 
-forfiles /p "D:\db_bak\files" /s /m  *.dmp /d -28 /c "cmd /c del @path"
+  ![image-20210615003738562](test6.assets/image-20210615003738562.png)
 
-forfiles /p "D:\db_bak\logs" /s /m  *.log /d -28 /c "cmd /c del @path"
+## 全库0级备份(只作一次)
 
-exit
+```
+run{
+configure retention policy to redundancy 1;
+configure controlfile autobackup on;
+configure controlfile autobackup format for device type disk to '/home/student/rman_backup/%F';
+configure default device type to disk;
+crosscheck backup;
+crosscheck archivelog all;
+allocate channel c1 device type disk;
+allocate channel c2 device type disk;
+allocate channel c3 device type disk;
+backup incremental level 0 database format '/home/student/rman_backup/level0_%d_%T_%U.bak';
+report obsolete;
+delete noprompt obsolete;
+delete noprompt expired backup;
+delete noprompt expired archivelog all;
+release channel c1;
+release channel c2;
+release channel c3;
+}
+```
 
-注释说明：以上为oracle备份脚本，需创建bat文件。导出语句可以使用以下两种
+![image-20210615003810276](test6.assets/image-20210615003810276.png)
 
-exp 用户名/密码@服务名 file=D:\ db_bak\xxx.dmp owner=用户名
+![image-20210615003828878](test6.assets/image-20210615003828878.png)
 
-exp 用户名/密码@ip/SID file=D:\ db_bak\xxx.dmp owner=用户名
+
+
+## 全库1级增量备份
+
+```
+run{
+configure retention policy to redundancy 1;
+configure controlfile autobackup on;
+configure controlfile autobackup format for device type disk to '/home/student/rman_backup/%F';
+configure default device type to disk;
+crosscheck backup;
+crosscheck archivelog all;
+allocate channel c1 device type disk;
+allocate channel c2 device type disk;
+allocate channel c3 device type disk;
+backup incremental level 1 database format '/home/student/rman_backup/level1_%d_%T_%U.bak';
+report obsolete;
+delete noprompt obsolete;
+delete noprompt expired backup;
+delete noprompt expired archivelog all;
+release channel c1;
+release channel c2;
+release channel c3;
+}
+```
+
+![image-20210615003920729](test6.assets/image-20210615003920729.png)
+
+![image-20210615003940198](test6.assets/image-20210615003940198.png)
+
+
+
+## 全库完全恢复
+
+- oracle登录linux,不是student用户,dedicated专用连接模式
+- 需要全库停机，需要oracle用户
+- sys登录到orcl，查看全库的数据文件
+
+```
+$ sqlplus / as sysdba
+SQL> select file_name from dba_data_files;
+
+- 全库停机
+$rman target /
+RMAN> shutdown immediate;  或者 shutdown abort;
+RMAN> exit
+
+- 数据文件改名，模拟文件损失
+$mv /home/student/pdb_ly/pdbtest_users02_1.dbf  /home/student/pdb_ly/pdbtest_users02_1.dbf2
+
+- 全库恢复
+$rman target /
+RMAN> startup mount;
+RMAN> restore database;
+RMAN> recover database;
+RMAN> alter database open;
+```
+
+![image-20210615004107915](test6.assets/image-20210615004107915.png)
+
+![image-20210615004345035](test6.assets/image-20210615004345035.png)
+
+![image-20210615004429741](test6.assets/image-20210615004429741.png)
+
+
+
+
 
 
 
